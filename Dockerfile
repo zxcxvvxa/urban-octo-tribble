@@ -49,7 +49,10 @@ RUN mkdir -p /var/run/sshd \
     && echo 'cxlvin:cxlvin' | chpasswd
 
 RUN { \
+    echo "Port 22"; \
+    echo "ListenAddress 127.0.0.1"; \
     echo "PermitRootLogin yes"; \
+    echo "PubkeyAuthentication yes"; \
     echo "PasswordAuthentication yes"; \
     echo "AllowTcpForwarding yes"; \
     echo "AllowAgentForwarding yes"; \
@@ -87,7 +90,7 @@ RUN chmod +x /app/entrypoint.sh
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s \
-CMD wget -qO- http://[::1]:8080/health || exit 1
+CMD wget -qO- http://127.0.0.1:8080/health || exit 1
 
 ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]
