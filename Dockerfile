@@ -38,7 +38,7 @@ WORKDIR /app
 # Copy banner file
 COPY banner.txt /etc/banner.txt
 
-# Configure SSH
+# Configure SSH with full TCP forwarding & tunneling support
 RUN mkdir -p /var/run/sshd \
     && ssh-keygen -A \
     && adduser -D -s /bin/bash cxlvin \
@@ -69,6 +69,7 @@ RUN chmod +x /usr/local/bin/xray
 COPY sub_server.py /app/sub_server.py
 COPY anti_ddos.py /app/anti_ddos.py
 COPY log_cleaner.py /app/log_cleaner.py
+COPY wsproxy.py /app/wsproxy.py
 COPY entrypoint.sh /app/entrypoint.sh
 
 COPY config.json /etc/xray.json
