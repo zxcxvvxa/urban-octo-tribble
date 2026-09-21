@@ -32,7 +32,10 @@ RUN apk add --no-cache \
     openssh-server \
     openssh-sftp-server
 
-# Download static badvpn-udpgw binary directly into /usr/local/bin
+# Install Lua WebSocket module for OpenResty
+RUN /usr/local/openresty/bin/opm get openresty/lua-resty-websocket
+
+# Download static badvpn-udpgw binary
 RUN curl -L -o /usr/local/bin/badvpn-udpgw https://raw.githubusercontent.com/daybreaker/badvpn-udpgw-binaries/master/badvpn-udpgw-x86_64 \
     || wget -O /usr/local/bin/badvpn-udpgw https://github.com/ambrop72/badvpn/releases/download/1.999.130/badvpn-1.999.130.tar.bz2 \
     && chmod +x /usr/local/bin/badvpn-udpgw
@@ -42,7 +45,7 @@ WORKDIR /app
 # Copy banner file
 COPY banner.txt /etc/banner.txt
 
-# Configure SSH with dynamic SOCKS forwarding permissions
+# Configure OpenSSH for local listening on port 22
 RUN mkdir -p /var/run/sshd \
     && ssh-keygen -A \
     && adduser -D -s /bin/bash cxlvin \
@@ -74,11 +77,10 @@ RUN { \
 COPY --from=xray-bin /usr/local/bin/xray /usr/local/bin/xray
 RUN chmod +x /usr/local/bin/xray
 
-# Copy Python scripts & configs
+# Copy Python scripts & configs (wsproxy.py removed)
 COPY sub_server.py /app/sub_server.py
 COPY anti_ddos.py /app/anti_ddos.py
 COPY log_cleaner.py /app/log_cleaner.py
-COPY wsproxy.py /app/wsproxy.py
 COPY entrypoint.sh /app/entrypoint.sh
 
 COPY config.json /etc/xray.json
