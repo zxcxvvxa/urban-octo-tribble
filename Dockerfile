@@ -42,7 +42,7 @@ WORKDIR /app
 # Copy banner file
 COPY banner.txt /etc/banner.txt
 
-# Configure SSH with full dynamic SOCKS & TCP forwarding permissions
+# Configure SSH with dynamic SOCKS forwarding permissions
 RUN mkdir -p /var/run/sshd \
     && ssh-keygen -A \
     && adduser -D -s /bin/bash cxlvin \
