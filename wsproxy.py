@@ -24,34 +24,36 @@ def create_ws_frame(payload, opcode=0x2):
 
 def parse_ws_frame(buffer):
     if len(buffer) < 2:
-        return None, buffer
+        return None, None, buffer
+    
     first_byte = buffer[0]
     second_byte = buffer[1]
     
+    opcode = first_byte & 0x0F
     masked = (second_byte & 0x80) != 0
     payload_len = second_byte & 0x7F
     
     offset = 2
     if payload_len == 126:
         if len(buffer) < 4:
-            return None, buffer
+            return None, None, buffer
         payload_len = struct.unpack("!H", buffer[2:4])[0]
         offset = 4
     elif payload_len == 127:
         if len(buffer) < 10:
-            return None, buffer
+            return None, None, buffer
         payload_len = struct.unpack("!Q", buffer[2:10])[0]
         offset = 10
         
     mask_key = None
     if masked:
         if len(buffer) < offset + 4:
-            return None, buffer
+            return None, None, buffer
         mask_key = buffer[offset:offset+4]
         offset += 4
         
     if len(buffer) < offset + payload_len:
-        return None, buffer
+        return None, None, buffer
         
     data = buffer[offset:offset+payload_len]
     remaining = buffer[offset+payload_len:]
@@ -62,10 +64,11 @@ def parse_ws_frame(buffer):
             unmasked[i] = data[i] ^ mask_key[i % 4]
         data = bytes(unmasked)
         
-    return data, remaining
+    return opcode, data, remaining
 
 def handle_client(client_sock):
     client_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    ssh_sock = None
     
     try:
         request_data = b""
@@ -78,12 +81,13 @@ def handle_client(client_sock):
             request_data += chunk
         client_sock.settimeout(None)
 
+        # Parse HTTP Headers cleanly in binary
         headers = {}
-        lines = request_data.decode('utf-8', errors='ignore').split("\r\n")
+        lines = request_data.split(b"\r\n")
         for line in lines[1:]:
-            if ":" in line:
-                k, v = line.split(":", 1)
-                headers[k.strip().lower()] = v.strip()
+            if b":" in line:
+                k, v = line.split(b":", 1)
+                headers[k.strip().lower().decode('utf-8', errors='ignore')] = v.strip().decode('utf-8', errors='ignore')
 
         ws_key = headers.get("sec-websocket-key")
         
@@ -114,6 +118,8 @@ def handle_client(client_sock):
 
     except Exception:
         client_sock.close()
+        if ssh_sock:
+            ssh_sock.close()
         return
 
     # 3. Stream data bidirectionally
@@ -130,28 +136,33 @@ def handle_client(client_sock):
                 if s is client_sock:
                     data = client_sock.recv(BUFFER_SIZE)
                     if not data:
-                        ssh_sock.close()
-                        client_sock.close()
-                        return
+                        raise ConnectionResetError()
                     
                     if is_ws:
                         client_buffer.extend(data)
                         while True:
-                            payload, remaining = parse_ws_frame(client_buffer)
-                            if payload is None:
+                            opcode, payload, remaining = parse_ws_frame(client_buffer)
+                            if opcode is None:
                                 break
+                            
                             client_buffer = bytearray(remaining)
-                            if payload:
-                                ssh_sock.sendall(payload)
+                            
+                            # Handle WS Opcodes
+                            if opcode == 0x8:  # Connection Close
+                                raise ConnectionResetError()
+                            elif opcode == 0x9:  # Ping -> Reply Pong
+                                pong_frame = create_ws_frame(payload, opcode=0xA)
+                                client_sock.sendall(pong_frame)
+                            elif opcode in (0x1, 0x2):  # Text or Binary Frame
+                                if payload:
+                                    ssh_sock.sendall(payload)
                     else:
                         ssh_sock.sendall(data)
 
                 elif s is ssh_sock:
                     data = ssh_sock.recv(BUFFER_SIZE)
                     if not data:
-                        client_sock.close()
-                        ssh_sock.close()
-                        return
+                        raise ConnectionResetError()
                     
                     if is_ws:
                         frame = create_ws_frame(data)
@@ -163,7 +174,8 @@ def handle_client(client_sock):
 
     try:
         client_sock.close()
-        ssh_sock.close()
+        if ssh_sock:
+            ssh_sock.close()
     except Exception:
         pass
 
@@ -174,10 +186,13 @@ def main():
     server.listen(1024)
 
     while True:
-        client_sock, _ = server.accept()
-        t = threading.Thread(target=handle_client, args=(client_sock,))
-        t.daemon = True
-        t.start()
+        try:
+            client_sock, _ = server.accept()
+            t = threading.Thread(target=handle_client, args=(client_sock,))
+            t.daemon = True
+            t.start()
+        except Exception:
+            continue
 
 if __name__ == '__main__':
     main()
