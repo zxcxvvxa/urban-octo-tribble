@@ -3,6 +3,7 @@ import select
 import hashlib
 import base64
 import struct
+import threading
 
 LISTEN_HOST = '127.0.0.1'
 LISTEN_PORT = 2222
@@ -66,90 +67,105 @@ def parse_ws_frame(buffer):
 def handle_client(client_sock):
     client_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     
-    # 1. Read HTTP Upgrade Request
-    request_data = b""
-    while b"\r\n\r\n" not in request_data:
-        chunk = client_sock.recv(4096)
-        if not chunk:
-            client_sock.close()
-            return
-        request_data += chunk
-
-    headers = {}
-    lines = request_data.decode('utf-8', errors='ignore').split("\r\n")
-    for line in lines[1:]:
-        if ":" in line:
-            k, v = line.split(":", 1)
-            headers[k.strip().lower()] = v.strip()
-
-    ws_key = headers.get("sec-websocket-key")
-    
-    # Send WebSocket Handshake or Direct Tunneling Ack
-    if ws_key:
-        accept_key = base64.b64encode(hashlib.sha1((ws_key + GUID).encode('utf-8')).digest()).decode('utf-8')
-        response = (
-            "HTTP/1.1 101 Switching Protocols\r\n"
-            "Upgrade: websocket\r\n"
-            "Connection: Upgrade\r\n"
-            f"Sec-WebSocket-Accept: {accept_key}\r\n\r\n"
-        )
-        client_sock.sendall(response.encode('utf-8'))
-        is_ws = True
-    else:
-        # Fallback raw SSH response
-        client_sock.sendall(b"HTTP/1.1 101 Connection Established\r\n\r\n")
-        is_ws = False
-
-    # 2. Connect to local OpenSSH Server
     try:
+        request_data = b""
+        client_sock.settimeout(10.0)
+        while b"\r\n\r\n" not in request_data:
+            chunk = client_sock.recv(4096)
+            if not chunk:
+                client_sock.close()
+                return
+            request_data += chunk
+        client_sock.settimeout(None)
+
+        headers = {}
+        lines = request_data.decode('utf-8', errors='ignore').split("\r\n")
+        for line in lines[1:]:
+            if ":" in line:
+                k, v = line.split(":", 1)
+                headers[k.strip().lower()] = v.strip()
+
+        ws_key = headers.get("sec-websocket-key")
+        
+        # 1. Handshake response
+        if ws_key:
+            accept_key = base64.b64encode(hashlib.sha1((ws_key + GUID).encode('utf-8')).digest()).decode('utf-8')
+            response = (
+                "HTTP/1.1 101 Switching Protocols\r\n"
+                "Upgrade: websocket\r\n"
+                "Connection: Upgrade\r\n"
+                f"Sec-WebSocket-Accept: {accept_key}\r\n\r\n"
+            )
+            client_sock.sendall(response.encode('utf-8'))
+            is_ws = True
+        else:
+            response = (
+                "HTTP/1.1 101 Connection Established\r\n"
+                "Upgrade: websocket\r\n"
+                "Connection: Upgrade\r\n\r\n"
+            )
+            client_sock.sendall(response.encode('utf-8'))
+            is_ws = False
+
+        # 2. Connect to local SSH target
         ssh_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         ssh_sock.connect((SSH_HOST, SSH_PORT))
         ssh_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
     except Exception:
         client_sock.close()
         return
 
-    # 3. Bidirectional Forwarding
+    # 3. Stream data bidirectionally
     client_buffer = bytearray()
     sockets = [client_sock, ssh_sock]
 
     while True:
-        r, _, e = select.select(sockets, [], sockets, 60)
-        if e or not r:
+        try:
+            r, _, e = select.select(sockets, [], sockets, 120)
+            if e or not r:
+                break
+
+            for s in r:
+                if s is client_sock:
+                    data = client_sock.recv(BUFFER_SIZE)
+                    if not data:
+                        ssh_sock.close()
+                        client_sock.close()
+                        return
+                    
+                    if is_ws:
+                        client_buffer.extend(data)
+                        while True:
+                            payload, remaining = parse_ws_frame(client_buffer)
+                            if payload is None:
+                                break
+                            client_buffer = bytearray(remaining)
+                            if payload:
+                                ssh_sock.sendall(payload)
+                    else:
+                        ssh_sock.sendall(data)
+
+                elif s is ssh_sock:
+                    data = ssh_sock.recv(BUFFER_SIZE)
+                    if not data:
+                        client_sock.close()
+                        ssh_sock.close()
+                        return
+                    
+                    if is_ws:
+                        frame = create_ws_frame(data)
+                        client_sock.sendall(frame)
+                    else:
+                        client_sock.sendall(data)
+        except Exception:
             break
 
-        for s in r:
-            if s is client_sock:
-                data = client_sock.recv(BUFFER_SIZE)
-                if not data:
-                    ssh_sock.close()
-                    client_sock.close()
-                    return
-                
-                if is_ws:
-                    client_buffer.extend(data)
-                    while True:
-                        payload, remaining = parse_ws_frame(client_buffer)
-                        if payload is None:
-                            break
-                        client_buffer = bytearray(remaining)
-                        if payload:
-                            ssh_sock.sendall(payload)
-                else:
-                    ssh_sock.sendall(data)
-
-            elif s is ssh_sock:
-                data = ssh_sock.recv(BUFFER_SIZE)
-                if not data:
-                    client_sock.close()
-                    ssh_sock.close()
-                    return
-                
-                if is_ws:
-                    frame = create_ws_frame(data)
-                    client_sock.sendall(frame)
-                else:
-                    client_sock.sendall(data)
+    try:
+        client_sock.close()
+        ssh_sock.close()
+    except Exception:
+        pass
 
 def main():
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -159,7 +175,6 @@ def main():
 
     while True:
         client_sock, _ = server.accept()
-        import threading
         t = threading.Thread(target=handle_client, args=(client_sock,))
         t.daemon = True
         t.start()
