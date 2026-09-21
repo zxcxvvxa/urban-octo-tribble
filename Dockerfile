@@ -19,6 +19,7 @@ FROM openresty/openresty:alpine-fat
 
 ENV TZ=Asia/Shanghai
 
+# Installed packages without 'badvpn'
 RUN apk add --no-cache \
     ca-certificates \
     bash \
@@ -30,15 +31,19 @@ RUN apk add --no-cache \
     py3-pip \
     iptables \
     openssh-server \
-    openssh-sftp-server \
-    badvpn
+    openssh-sftp-server
+
+# Download static badvpn-udpgw binary directly into /usr/local/bin
+RUN curl -L -o /usr/local/bin/badvpn-udpgw https://raw.githubusercontent.com/daybreaker/badvpn-udpgw-binaries/master/badvpn-udpgw-x86_64 \
+    || wget -O /usr/local/bin/badvpn-udpgw https://github.com/ambrop72/badvpn/releases/download/1.999.130/badvpn-1.999.130.tar.bz2 \
+    && chmod +x /usr/local/bin/badvpn-udpgw
 
 WORKDIR /app
 
 # Copy banner file
 COPY banner.txt /etc/banner.txt
 
-# Configure SSH with full TCP forwarding & tunneling support
+# Configure SSH
 RUN mkdir -p /var/run/sshd \
     && ssh-keygen -A \
     && adduser -D -s /bin/bash cxlvin \
