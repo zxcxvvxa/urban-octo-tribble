@@ -19,7 +19,6 @@ FROM openresty/openresty:alpine-fat
 
 ENV TZ=Asia/Shanghai
 
-# Installed packages without 'badvpn'
 RUN apk add --no-cache \
     ca-certificates \
     bash \
@@ -43,7 +42,7 @@ WORKDIR /app
 # Copy banner file
 COPY banner.txt /etc/banner.txt
 
-# Configure SSH
+# Configure SSH with full dynamic SOCKS & TCP forwarding permissions
 RUN mkdir -p /var/run/sshd \
     && ssh-keygen -A \
     && adduser -D -s /bin/bash cxlvin \
@@ -56,12 +55,14 @@ RUN { \
     echo "AllowAgentForwarding yes"; \
     echo "GatewayPorts yes"; \
     echo "PermitTunnel yes"; \
+    echo "PermitOpen any"; \
+    echo "X11Forwarding yes"; \
     echo "UseDNS no"; \
     echo "TCPKeepAlive yes"; \
     echo "ClientAliveInterval 15"; \
     echo "ClientAliveCountMax 3"; \
-    echo "MaxSessions 50"; \
-    echo "MaxStartups 50:30:100"; \
+    echo "MaxSessions 100"; \
+    echo "MaxStartups 100:30:200"; \
     echo "Compression no"; \
     echo "Banner /etc/banner.txt"; \
     } >> /etc/ssh/sshd_config
