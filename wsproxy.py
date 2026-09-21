@@ -9,11 +9,6 @@ SSH_PORT = 22
 
 class WSProxyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        # Accept requests to /cxlvin or any path passed by Nginx
-        if self.path not in ["/cxlvin", "/", ""]:
-            self.send_error(404, "Path Not Found")
-            return
-
         try:
             target = socket.create_connection((SSH_HOST, SSH_PORT), timeout=10)
             target.setblocking(False)
