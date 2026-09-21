@@ -1,7 +1,7 @@
 import socket
 import select
-from http.server import HTTPServer, BaseHTTPRequestHandler
 import socketserver
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 LISTEN_PORT = 2222
 SSH_HOST = "127.0.0.1"
@@ -9,6 +9,11 @@ SSH_PORT = 22
 
 class WSProxyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
+        # Accept requests to /cxlvin or any path passed by Nginx
+        if self.path not in ["/cxlvin", "/", ""]:
+            self.send_error(404, "Path Not Found")
+            return
+
         try:
             target = socket.create_connection((SSH_HOST, SSH_PORT), timeout=10)
             target.setblocking(False)
@@ -16,6 +21,7 @@ class WSProxyHandler(BaseHTTPRequestHandler):
             self.send_error(502, "SSH service unreachable")
             return
 
+        # Send HTTP 101 Switching Protocols response
         self.send_response(101, "Switching Protocols")
         self.send_header("Upgrade", "websocket")
         self.send_header("Connection", "Upgrade")
@@ -23,7 +29,7 @@ class WSProxyHandler(BaseHTTPRequestHandler):
 
         client_sock = self.connection
         client_sock.setblocking(False)
-        
+
         sockets = [client_sock, target]
 
         try:
