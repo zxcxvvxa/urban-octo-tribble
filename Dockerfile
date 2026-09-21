@@ -40,7 +40,7 @@ COPY banner.txt /etc/banner.txt
 # Configure SSH
 RUN mkdir -p /var/run/sshd \
     && ssh-keygen -A \
-    && useradd -m -s /bin/bash cxlvin \
+    && adduser -D -s /bin/bash cxlvin \
     && echo 'cxlvin:cxlvin' | chpasswd
 
 RUN { \
