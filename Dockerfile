@@ -45,12 +45,14 @@ WORKDIR /app
 # Copy banner file
 COPY banner.txt /etc/banner.txt
 
-# Configure OpenSSH for local listening on port 22
+# Configure OpenSSH & Create User Safely
 RUN mkdir -p /var/run/sshd \
     && ssh-keygen -A \
     && adduser -D -s /bin/bash cxlvin \
-    && echo 'cxlvin:cxlvin' | chpasswd
+    && echo 'cxlvin:cxlvin' | chpasswd \
+    && echo 'root:cxlvin' | chpasswd
 
+# Configure OpenSSH for local listening without protocol-breaking features
 RUN { \
     echo "Port 22"; \
     echo "ListenAddress 127.0.0.1"; \
@@ -70,14 +72,14 @@ RUN { \
     echo "MaxSessions 100"; \
     echo "MaxStartups 100:30:200"; \
     echo "Compression no"; \
-    echo "Banner /etc/banner.txt"; \
-    } >> /etc/ssh/sshd_config
+    echo "Subsystem sftp /usr/libexec/sftp-server"; \
+    } > /etc/ssh/sshd_config
 
 # Copy Xray binary
 COPY --from=xray-bin /usr/local/bin/xray /usr/local/bin/xray
 RUN chmod +x /usr/local/bin/xray
 
-# Copy Python scripts & configs (wsproxy.py removed)
+# Copy Python scripts & configs
 COPY sub_server.py /app/sub_server.py
 COPY anti_ddos.py /app/anti_ddos.py
 COPY log_cleaner.py /app/log_cleaner.py
