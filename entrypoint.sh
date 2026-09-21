@@ -4,15 +4,14 @@ set -e
 echo "[+] Starting container initialization..."
 
 # 1. File Descriptor Limits
-# Increases file descriptors for high concurrency (fallback safely if restricted)
+# Increases file descriptors for high concurrency (fallbacks safely if restricted)
 ulimit -n 65535 2>/dev/null || true
 
 # 2. Kernel & TCP Socket Tuning
-# Requires runtime capabilities (--cap-add=SYS_ADMIN or --privileged) to apply.
-# Suppresses errors gracefully in restricted container environments like Cloud Run where /proc/sys is read-only.
+# Requires runtime capabilities (--cap-add=NET_ADMIN / --privileged)
+# Suppresses errors gracefully in restricted container environments (e.g. GCP Cloud Run)
 echo "[+] Attempting Kernel & TCP Socket Tuning..."
 
-# Enable BBR Congestion Control
 sysctl -w net.core.default_qdisc=fq 2>/dev/null || true
 sysctl -w net.ipv4.tcp_congestion_control=bbr 2>/dev/null || true
 
@@ -27,17 +26,17 @@ sysctl -w net.ipv4.tcp_fin_timeout=15 2>/dev/null || true
 sysctl -w net.ipv4.tcp_tw_reuse=1 2>/dev/null || true
 sysctl -w net.ipv4.tcp_fastopen=3 2>/dev/null || true
 
-# 3. SSH Setup
-echo "[+] Generating SSH Host Keys and setup runtime directories..."
+# 3. SSH Setup & App Permissions
+echo "[+] Generating SSH Host Keys and setting up runtime directories..."
 ssh-keygen -A 2>/dev/null || true
 mkdir -p /run/sshd /var/run/sshd
+chmod +x /app/*.py 2>/dev/null || true
 
 # 4. Process Handover
-# Pass control directly to Docker/Container CMD or default process manager
 if [ "$#" -gt 0 ]; then
     echo "[+] Handing over execution to CMD: $@"
     exec "$@"
 else
     echo "[+] Handing over process management to Supervisor..."
-    exec /usr/bin/supervisord -c /etc/supervisor/supervisord.conf
+    exec /usr/bin/supervisord -c /etc/supervisord.conf
 fi
