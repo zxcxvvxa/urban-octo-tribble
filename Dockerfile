@@ -30,7 +30,8 @@ RUN apk add --no-cache \
     py3-pip \
     iptables \
     openssh-server \
-    openssh-sftp-server
+    openssh-sftp-server \
+    badvpn
 
 WORKDIR /app
 
@@ -46,6 +47,10 @@ RUN mkdir -p /var/run/sshd \
 RUN { \
     echo "PermitRootLogin yes"; \
     echo "PasswordAuthentication yes"; \
+    echo "AllowTcpForwarding yes"; \
+    echo "AllowAgentForwarding yes"; \
+    echo "GatewayPorts yes"; \
+    echo "PermitTunnel yes"; \
     echo "UseDNS no"; \
     echo "TCPKeepAlive yes"; \
     echo "ClientAliveInterval 15"; \
