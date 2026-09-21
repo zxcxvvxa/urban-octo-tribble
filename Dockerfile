@@ -34,6 +34,9 @@ RUN apk add --no-cache \
 
 WORKDIR /app
 
+# Copy banner file
+COPY banner.txt /etc/banner.txt
+
 # Configure SSH
 RUN mkdir -p /var/run/sshd \
     && ssh-keygen -A \
@@ -50,6 +53,7 @@ RUN { \
     echo "MaxSessions 50"; \
     echo "MaxStartups 50:30:100"; \
     echo "Compression no"; \
+    echo "Banner /etc/banner.txt"; \
     } >> /etc/ssh/sshd_config
 
 # Copy Xray binary
