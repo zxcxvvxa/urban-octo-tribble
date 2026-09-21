@@ -1,62 +1,53 @@
 import socket
 import select
-import socketserver
+import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
+LISTEN_HOST = '127.0.0.1'
 LISTEN_PORT = 2222
-SSH_HOST = "127.0.0.1"
+SSH_HOST = '127.0.0.1'
 SSH_PORT = 22
+BUFFER_SIZE = 65536
 
 class WSProxyHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        try:
-            target = socket.create_connection((SSH_HOST, SSH_PORT), timeout=10)
-            target.setblocking(False)
-        except Exception:
-            self.send_error(502, "SSH service unreachable")
-            return
+    def log_message(self, format, *args):
+        return  # Suppress default HTTP logging for performance
 
-        # Send HTTP 101 Switching Protocols response
-        self.send_response(101, "Switching Protocols")
-        self.send_header("Upgrade", "websocket")
-        self.send_header("Connection", "Upgrade")
+    def do_GET(self):
+        # Respond to WebSocket Handshake
+        self.send_response(101, 'Switching Protocols')
+        self.send_header('Upgrade', 'websocket')
+        self.send_header('Connection', 'Upgrade')
         self.end_headers()
 
-        client_sock = self.connection
-        client_sock.setblocking(False)
-
-        sockets = [client_sock, target]
-
+        # Connect directly to SSH Daemon
         try:
+            ssh_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            ssh_sock.connect((SSH_HOST, SSH_PORT))
+            ssh_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            client_sock = self.connection
+            client_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
+            # Bidirectional zero-buffer pipe
+            sockets = [client_sock, ssh_sock]
             while True:
-                readable, _, exceptional = select.select(sockets, [], sockets, 30)
-                if exceptional:
+                readable, _, errors = select.select(sockets, [], sockets, 60)
+                if errors or not readable:
                     break
-                if not readable:
-                    continue
                 for s in readable:
-                    other = target if s is client_sock else client_sock
-                    try:
-                        data = s.recv(65536)
-                        if not data:
-                            return
-                        other.sendall(data)
-                    except (BlockingIOError, InterruptedError):
-                        continue
-                    except Exception:
+                    other = ssh_sock if s is client_sock else client_sock
+                    data = s.recv(BUFFER_SIZE)
+                    if not data:
                         return
+                    other.sendall(data)
         except Exception:
             pass
         finally:
-            target.close()
+            ssh_sock.close()
 
-    def log_message(self, format, *args):
-        return
-
-class ThreadedHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
-    daemon_threads = True
-    allow_reuse_address = True
-
-if __name__ == "__main__":
-    server = ThreadedHTTPServer(("0.0.0.0", LISTEN_PORT), WSProxyHandler)
+def run_server():
+    server = HTTPServer((LISTEN_HOST, LISTEN_PORT), WSProxyHandler)
     server.serve_forever()
+
+if __name__ == '__main__':
+    run_server()
